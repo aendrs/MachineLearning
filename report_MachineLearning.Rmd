@@ -1,0 +1,145 @@
+---
+title: "Practical Machine Learning Project"
+author: "C. Andrés Méndez"
+date: "August, 2015"
+output: html_document
+---
+
+### Data Loading and Initial Feature Pruning
+
+```{r,message=FALSE,warning=FALSE}
+library(caret)
+library(corrplot)
+library(plyr)
+```
+
+First chunk of code where the training and testing datasets are loaded.
+
+```{r, cache=TRUE, message=FALSE}
+setwd("~/DataScience/MachineLearning")
+traindata<-read.csv('pml-training.csv', stringsAsFactors=TRUE)
+testdata<-read.csv('pml-testing.csv', stringsAsFactors=TRUE)
+```
+
+Comb and select an initial subset of apropriate features to use for classification. Avoid features with missing values and NAs.
+```{r}
+train_sub<-subset(traindata,select=c( "roll_belt", "pitch_belt", "yaw_belt", "total_accel_belt" ,"gyros_belt_x" ,"gyros_belt_y" ,"gyros_belt_z" ,"accel_belt_x"   ,"accel_belt_y"   ,"accel_belt_z" ,"magnet_belt_x" ,"magnet_belt_y" , "magnet_belt_z" ,"roll_arm","pitch_arm" ,"yaw_arm" ,"total_accel_arm", "gyros_arm_x","gyros_arm_y","gyros_arm_z" ,"accel_arm_x",  "accel_arm_y", "accel_arm_z", "magnet_arm_x", "magnet_arm_y", "magnet_arm_z", "roll_dumbbell", "pitch_dumbbell", "yaw_dumbbell",  "total_accel_dumbbell" ,"gyros_dumbbell_x", "gyros_dumbbell_y", "gyros_dumbbell_z" , "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z", "magnet_dumbbell_x", "magnet_dumbbell_y" , "magnet_dumbbell_z", "roll_forearm", "pitch_forearm", "yaw_forearm", "total_accel_forearm", "gyros_forearm_x", "gyros_forearm_y", "gyros_forearm_z", "accel_forearm_x", "accel_forearm_y",  "accel_forearm_z",  "magnet_forearm_x", "magnet_forearm_y", "magnet_forearm_z","classe"))
+
+#create dummy variables for the factor variable "user_name" and then append the new vars to the feature data frame
+dummy_vars<-data.frame(model.matrix(~traindata$user_name))
+train_sub2<-cbind(dummy_vars[,-1],train_sub)
+
+#create the vector of target labels
+train_labels=traindata$classe
+```
+Check some features by doing scatterplots and density plots.
+
+```{r}
+qplot(yaw_belt,colour=classe,data=train_sub2,geom="density")
+```
+Interestingly, despite the general overlap, class E shows a wide distribution that might be useful for classification. The wide distribution of E is evident in other features such as the in the following graph.
+
+```{r}
+qplot(magnet_belt_y,colour=classe,data=train_sub2,geom="density")
+```
+
+In some features a clear spike can be found, such as.
+```{r}
+qplot(gyros_arm_x,colour=classe,data=train_sub2,geom="density")
+```
+
+
+
+
+
+### PreProcessing and Feature Selection
+
+As a feature selection method we'll remove features with a correlation score larger than 0.7
+
+First create a correlation matrix and visualize it ordering it via hierarchical clustering in order to visualize the clusters of correlating variables.
+
+```{r}
+preproc<-preProcess(train_sub2[,-58],method=c("center","scale"))
+train_preproc<-predict(preproc,train_sub2[,-58])
+
+corMat <- cor(train_preproc)
+corrplot(corMat, order = "hclust",tl.cex=.6)
+```
+
+Seeing the result we can conclude that most of the variables are not so strongly correlated. Now we set a threshold.
+
+```{r}
+highlyCor <- findCorrelation(corMat, 0.70)
+#Apply correlation filter at 0.70,
+#then we remove all the variable correlated with more 0.7.
+train_filtcorr<- train_preproc[,-highlyCor]
+corMatfilt <- cor(train_filtcorr)
+corrplot(corMatfilt, order = "hclust",tl.cex=0.65)
+#add the target labels back to the preprocessed data
+train_filtcorr$classe<-train_sub2$classe
+```
+
+
+
+### Classification with LDA (with Bootstraping and CrossValidation)
+
+```{r,cache=TRUE}
+#forestFit<-train(classe~.,data=train_filtcorr,method="rf",prox=TRUE)
+
+LDAfit<-train(classe~.,data=train_filtcorr,method="lda")
+```
+
+Now let's look at the characteristics of the model
+
+```{r}
+LDAfit
+```
+The accuracy is rather low!  worse than expected. Let's try using all the features (before the feture selection by correlation analysis).
+
+```{r,cache=TRUE}
+
+train_preproc$classe<-train_sub2$classe
+LDAfit2<-train(classe~.,data=train_preproc,method="lda")
+LDAfit2
+
+#Now with CROSS VALIDATION
+ctrl <- trainControl(## 5-fold CV
+                    method = "repeatedcv",
+                    number = 5,
+                    repeats=5)
+
+LDAfit3<-train(classe~.,data=train_preproc,method="lda",trControl = ctrl)
+LDAfit3
+```
+The accuracy is clearly superior. For the purposes of this project let's keep this model.
+
+
+### Testing the model 
+
+Now apply the LDA model to the test dataset.
+
+```{r}
+#Subset the testing data as it was done with the training data
+
+test_sub<-subset(testdata,select=c( "roll_belt", "pitch_belt", "yaw_belt", "total_accel_belt" ,"gyros_belt_x" ,"gyros_belt_y" ,"gyros_belt_z" ,"accel_belt_x"   ,"accel_belt_y"   ,"accel_belt_z" ,"magnet_belt_x" ,"magnet_belt_y" , "magnet_belt_z" ,"roll_arm","pitch_arm" ,"yaw_arm" ,"total_accel_arm", "gyros_arm_x","gyros_arm_y","gyros_arm_z" ,"accel_arm_x",  "accel_arm_y", "accel_arm_z", "magnet_arm_x", "magnet_arm_y", "magnet_arm_z", "roll_dumbbell", "pitch_dumbbell", "yaw_dumbbell",  "total_accel_dumbbell" ,"gyros_dumbbell_x", "gyros_dumbbell_y", "gyros_dumbbell_z" , "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z", "magnet_dumbbell_x", "magnet_dumbbell_y" , "magnet_dumbbell_z", "roll_forearm", "pitch_forearm", "yaw_forearm", "total_accel_forearm", "gyros_forearm_x", "gyros_forearm_y", "gyros_forearm_z", "accel_forearm_x", "accel_forearm_y",  "accel_forearm_z",  "magnet_forearm_x", "magnet_forearm_y", "magnet_forearm_z"))
+
+dummy_vars_test<-data.frame(model.matrix(~testdata$user_name))
+
+test_sub2<-cbind(dummy_vars_test[,-1],test_sub)
+#test_sub2[,1:57] <- sapply(test_sub2[,1:57], as.numeric)
+
+#change the name of the indicator variables to match the names in the train dataset (to avoid problems with the preprocessing function)
+test_sub2<-rename(test_sub2,c("testdata.user_namecarlitos"="traindata.user_namecarlitos","testdata.user_namecharles"="traindata.user_namecharles","testdata.user_nameeurico"="traindata.user_nameeurico","testdata.user_namejeremy"="traindata.user_namejeremy","testdata.user_namepedro"="traindata.user_namepedro"))
+
+#same preproc as in training
+test_preproc<-predict(preproc,test_sub2)
+
+#with the preprocessed testing data, use the LDA model
+test<-predict(LDAfit3,test_preproc)
+
+#Show the prediction vector
+test
+```
+
+
+
